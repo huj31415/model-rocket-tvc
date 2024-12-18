@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 
 dt = 0.01  # timestep
 
-MAX_T = 50 # time to stop sim
+MAX_T = 60 # time to stop sim
 CP = 0  # neutral stability
 TVC_PIVOT_DIST = 25  # TVC motor mount pivot distance
 TVC_LENGTH = 5  # Length of motor
@@ -15,7 +15,7 @@ TVC_DELAY_DT = 2     # how many dt to delay reaction by
 MOI = 5  # moment of inertia
 MASS = 1
 G = 9.81
-DRAG_FACTOR = 1 # drag coeff or area or smth
+DRAG_FACTOR = .01 # drag coeff or area or smth
 RHO = 1.204 # kg/m^3
 
 # Simulation state variables
@@ -31,15 +31,16 @@ dpitch = [0]
 d2pitch = [0]
 AoA = [0] # rad
 drag = [0]
+localF = [0]
 vNet = [0]
 vAngle = [0]
 tvc_deflection = [0]  # motor pitch relative to rocket
 setPitch = [90]  # pitch setpoint
 
 # PID vars - Ziegler-Nichols method
-i = 0
-Ku = 0.5
-Tu = 18.2
+i = 0       # integral error value
+Ku = 0.5    # oscillating KP value
+Tu = 18.2   # oscillation period
 KP = Ku * 0.6
 KI = Ku * 1.2 / Tu
 KD = 3 * Ku * Tu / 40
@@ -60,8 +61,9 @@ def PID(setpoint, position):
 
 # Returns thrust in N
 def thrust(t):
-  # return 100 if t <= MAX_T else 0
-  return math.sqrt(t) * 100
+  # return 100 if t <= MAX_T else 0     # constant thrust
+  # return math.sqrt(t) * 100           # sqrt thrust
+  return math.exp(-t/10) * 100 + 10   # exponential decay thrust
 
 # Simulation loop
 def simloop():
@@ -96,11 +98,11 @@ def simloop():
   AoA.append(math.radians(pitch[-1]) - vAngle[-1])
   drag.append(0.5 * DRAG_FACTOR * math.cos(AoA[-1]) * vNet[-1] * vNet[-1] * RHO)
   # Add rocket force - drag force
-  localF = F * math.cos(tvc_rad)# - drag[-1]
+  localF.append(F * math.cos(tvc_rad))# - drag[-1]
   
   # Acceleration from force
-  d2x.append(localF * math.cos(pitch_rad) / MASS)
-  d2y.append(localF * math.sin(pitch_rad) / MASS - G)
+  d2x.append(localF[-1] * math.cos(pitch_rad) / MASS)
+  d2y.append(localF[-1] * math.sin(pitch_rad) / MASS - G)
 
   # Angular acceleration
   d2pitch.append(F * math.sin(tvc_rad) * TVC_PIVOT_DIST / MOI)
@@ -118,69 +120,50 @@ def simloop():
 
 while t[-1] < MAX_T: # and x[-1] >= 0:
   # setPitch.append(90 if t[-1] <= 10 else 0)
-  setPitch.append(random.randrange(45, 135) if t[-1] % 20 <= 0.001 else setPitch[-1])
+  setPitch.append(random.randrange(30, 150) if t[-1] % 20 <= 0.001 else setPitch[-1])
   simloop()
 
 # Plotting
 nrows = 3
+ncols = 3
+plotIndex = 1
+
 plt.figure(figsize=(12, 8))
 
-# Plot pitch
-plt.subplot(nrows, 2, 1)
-plt.plot(t, pitch, label="Pitch (degrees)")
-plt.plot(t, setPitch, label="Pitch setpoint (deg)")
-# plt.axhline(setPitch, color='r', linestyle='--', label="Setpoint")
-plt.xlabel("Time (s)")
-plt.ylabel("Pitch (deg)")
-plt.axis([0, MAX_T, 0, 180])
-plt.legend()
-plt.grid()
+def plot(x:list, vars:list, xLabel:str, yLabel:str, labels, lims=None):
+  global nrows, ncols, plotIndex
+  
+  plt.subplot(nrows, ncols, plotIndex)
+  if type(vars[0]) == list:
+    for n, var in enumerate(vars):
+      plt.plot(x, var, label=labels[n])
+  else:
+    plt.plot(x, vars, label=labels)
 
+  plt.xlabel(xLabel)
+  plt.ylabel(yLabel)
+    
+  if lims: plt.axis(lims)
+  plt.legend()
+  plt.grid()
+  plotIndex += 1
+  pass
 
-# Plot pitch rate
-plt.subplot(nrows, 2, 2)
-plt.plot(t, dpitch, label="Pitch rate")
-plt.xlabel("Time (s)")
-plt.ylabel("Pitch rate (deg/s)")
-plt.legend()
-plt.grid()
+plot(t, [pitch, setPitch], "Time (s)", "Pitch (deg)", ["Pitch", "Pitch setpoint"], [0, MAX_T, 0, 180])
 
-# Plot y displacement
-plt.subplot(nrows, 2, 3)
-plt.plot(t, y, label="Vertical Displacement (m)")
-plt.xlabel("Time (s)")
-plt.ylabel("Displacement (m)")
-plt.legend()
-plt.grid()
+plot(t, dpitch, "Time (s)", "Pitch rate (deg/s)", "Pitch rate")
 
-# Plot x displacement
-plt.subplot(nrows, 2, 4)
-plt.plot(t, x, label="Horizontal Displacement (m)")
-plt.xlabel("Time (s)")
-plt.ylabel("Displacement (m)")
-plt.legend()
-plt.grid()
+plot(t, y, "Time (s)", "Height (m)", "Height")
 
-# plot drag
-plt.subplot(nrows, 2, 5)
-plt.plot(t, drag, label="drag")
-plt.xlabel("Time (s)")
-plt.ylabel("drag")
-plt.legend()
-plt.grid()
+plot(dx, t, "Velocity (m/s)", "Time (s)", "Horizontal velocity")
 
-# plot AoA
-plt.subplot(nrows, 2, 6)
-plt.plot(t, AoA, label="AoA (rad)")
-plt.xlabel("Time (s)")
-plt.ylabel("AoA (rad)")
-plt.legend()
-plt.grid()
+plot(t, drag, "Time (s)", "Drag", "Drag")
 
+plot(t, AoA, "Time (s)", "AoA (rad)", "AoA")
 
 plt.tight_layout()
 
-# plt.subplot(nrows, 2, 6)
+# Plot error + TVC correction in one graph
 fig, ax1 = plt.subplots()
 
 # Plot error
