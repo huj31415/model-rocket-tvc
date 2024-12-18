@@ -15,7 +15,8 @@ TVC_DELAY_DT = 2     # how many dt to delay reaction by
 MOI = 5  # moment of inertia
 MASS = 1
 G = 9.81
-CD = 1 # drag coeff
+DRAG_FACTOR = 1 # drag coeff or area or smth
+RHO = 1.204 # kg/m^3
 
 # Simulation state variables
 t = [0]
@@ -28,7 +29,10 @@ d2y = [0]
 pitch = [90]
 dpitch = [0]
 d2pitch = [0]
-AoA = [0]
+AoA = [0] # rad
+drag = [0]
+vNet = [0]
+vAngle = [0]
 tvc_deflection = [0]  # motor pitch relative to rocket
 setPitch = [90]  # pitch setpoint
 
@@ -86,7 +90,15 @@ def simloop():
   tvc_rad = math.radians(tvc_deflection[-1])
   
   # Forces in local coordinates
-  localF = F * math.cos(tvc_rad)
+  # Drag force
+  vAngle.append(math.atan2(dy[-1], dx[-1]))
+  vNet.append(math.hypot(dx[-1], dy[-1]))
+  AoA.append(math.radians(pitch[-1]) - vAngle[-1])
+  drag.append(0.5 * DRAG_FACTOR * math.cos(AoA[-1]) * vNet[-1] * vNet[-1] * RHO)
+  # Add rocket force - drag force
+  localF = F * math.cos(tvc_rad)# - drag[-1]
+  
+  # Acceleration from force
   d2x.append(localF * math.cos(pitch_rad) / MASS)
   d2y.append(localF * math.sin(pitch_rad) / MASS - G)
 
@@ -106,35 +118,27 @@ def simloop():
 
 while t[-1] < MAX_T: # and x[-1] >= 0:
   # setPitch.append(90 if t[-1] <= 10 else 0)
-  setPitch.append(random.randrange(-180, 180) if t[-1] % 20 <= 0.001 else setPitch[-1])
+  setPitch.append(random.randrange(45, 135) if t[-1] % 20 <= 0.001 else setPitch[-1])
   simloop()
 
 # Plotting
-nplots = 5
+nrows = 3
 plt.figure(figsize=(12, 8))
 
 # Plot pitch
-plt.subplot(nplots, 1, 1)
+plt.subplot(nrows, 2, 1)
 plt.plot(t, pitch, label="Pitch (degrees)")
 plt.plot(t, setPitch, label="Pitch setpoint (deg)")
 # plt.axhline(setPitch, color='r', linestyle='--', label="Setpoint")
 plt.xlabel("Time (s)")
 plt.ylabel("Pitch (deg)")
-plt.axis([0, MAX_T, -180, 180])
+plt.axis([0, MAX_T, 0, 180])
 plt.legend()
 plt.grid()
 
-# Plot TVC deflection
-plt.subplot(nplots, 1, 2)
-plt.plot(t, tvc_deflection, label="TVC deflection (deg)")
-plt.xlabel("Time (s)")
-plt.ylabel("TVC deflection (deg)")
-plt.axis([0, MAX_T, -MAX_TV_DEFLECTION - 1, MAX_TV_DEFLECTION + 1])
-plt.legend()
-plt.grid()
 
 # Plot pitch rate
-plt.subplot(nplots, 1, 3)
+plt.subplot(nrows, 2, 2)
 plt.plot(t, dpitch, label="Pitch rate")
 plt.xlabel("Time (s)")
 plt.ylabel("Pitch rate (deg/s)")
@@ -142,7 +146,7 @@ plt.legend()
 plt.grid()
 
 # Plot y displacement
-plt.subplot(nplots, 1, 4)
+plt.subplot(nrows, 2, 3)
 plt.plot(t, y, label="Vertical Displacement (m)")
 plt.xlabel("Time (s)")
 plt.ylabel("Displacement (m)")
@@ -150,14 +154,33 @@ plt.legend()
 plt.grid()
 
 # Plot x displacement
-plt.subplot(nplots, 1, 5)
+plt.subplot(nrows, 2, 4)
 plt.plot(t, x, label="Horizontal Displacement (m)")
 plt.xlabel("Time (s)")
 plt.ylabel("Displacement (m)")
 plt.legend()
 plt.grid()
 
-# plt.subplot(nplots, 1, 4)
+# plot drag
+plt.subplot(nrows, 2, 5)
+plt.plot(t, drag, label="drag")
+plt.xlabel("Time (s)")
+plt.ylabel("drag")
+plt.legend()
+plt.grid()
+
+# plot AoA
+plt.subplot(nrows, 2, 6)
+plt.plot(t, AoA, label="AoA (rad)")
+plt.xlabel("Time (s)")
+plt.ylabel("AoA (rad)")
+plt.legend()
+plt.grid()
+
+
+plt.tight_layout()
+
+# plt.subplot(nrows, 2, 6)
 fig, ax1 = plt.subplots()
 
 # Plot error
