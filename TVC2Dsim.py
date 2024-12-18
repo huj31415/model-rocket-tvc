@@ -1,4 +1,5 @@
 import math
+import random
 import matplotlib.pyplot as plt
 
 
@@ -10,7 +11,7 @@ TVC_PIVOT_DIST = 25  # TVC motor mount pivot distance
 TVC_LENGTH = 5  # Length of motor
 MAX_TV_DEFLECTION = 5  # Max motor angular deflection in degrees
 MAX_DEG_PER_SEC = 50  # Max motor deflection speed in deg/s
-TVC_DELAY = 2 * dt     # how many dt to delay reaction by
+TVC_DELAY_DT = 2     # how many dt to delay reaction by
 MOI = 5  # moment of inertia
 MASS = 1
 G = 9.81
@@ -55,7 +56,8 @@ def PID(setpoint, position):
 
 # Returns thrust in N
 def thrust(t):
-  return 100 if t <= MAX_T else 0
+  # return 100 if t <= MAX_T else 0
+  return math.sqrt(t) * 100
 
 # Simulation loop
 def simloop():
@@ -64,7 +66,7 @@ def simloop():
 
   # Update TVC angle with max deflection speed
   prev_tvc_angle = tvc_deflection[-1]
-  desired_tvc_angle = PID(setPitch[-1], pitch[-1])
+  desired_tvc_angle = PID(setPitch[-1], pitch[max(0,len(pitch) - TVC_DELAY_DT)])
   max_deflection_step = MAX_DEG_PER_SEC * dt
 
   # Limit the rate of change of the TVC deflection
@@ -75,7 +77,7 @@ def simloop():
   else:
     tvc_angle = desired_tvc_angle
 
-  tvc_angle = max(-MAX_TV_DEFLECTION, min(MAX_TV_DEFLECTION, tvc_angle)) if t[-1] >= TVC_DELAY else 0
+  tvc_angle = max(-MAX_TV_DEFLECTION, min(MAX_TV_DEFLECTION, tvc_angle)) # if t[-1] >= TVC_DELAY_DT * dt else 0
   tvc_deflection.append(tvc_angle)
 
   # Get thrust and forces
@@ -103,11 +105,12 @@ def simloop():
 
 
 while t[-1] < MAX_T: # and x[-1] >= 0:
-  setPitch.append(90 if t[-1] <= 10 else 0)
+  # setPitch.append(90 if t[-1] <= 10 else 0)
+  setPitch.append(random.randrange(-180, 180) if t[-1] % 20 <= 0.001 else setPitch[-1])
   simloop()
 
 # Plotting
-nplots = 4
+nplots = 5
 plt.figure(figsize=(12, 8))
 
 # Plot pitch
@@ -123,15 +126,23 @@ plt.grid()
 
 # Plot TVC deflection
 plt.subplot(nplots, 1, 2)
+plt.plot(t, tvc_deflection, label="TVC deflection (deg)")
+plt.xlabel("Time (s)")
+plt.ylabel("TVC deflection (deg)")
+plt.axis([0, MAX_T, -MAX_TV_DEFLECTION - 1, MAX_TV_DEFLECTION + 1])
+plt.legend()
+plt.grid()
+
+# Plot pitch rate
+plt.subplot(nplots, 1, 3)
 plt.plot(t, dpitch, label="Pitch rate")
 plt.xlabel("Time (s)")
 plt.ylabel("Pitch rate (deg/s)")
-# plt.axis([0, MAX_T, -MAX_TV_DEFLECTION - 1, MAX_TV_DEFLECTION + 1])
 plt.legend()
 plt.grid()
 
 # Plot y displacement
-plt.subplot(nplots, 1, 3)
+plt.subplot(nplots, 1, 4)
 plt.plot(t, y, label="Vertical Displacement (m)")
 plt.xlabel("Time (s)")
 plt.ylabel("Displacement (m)")
@@ -139,7 +150,7 @@ plt.legend()
 plt.grid()
 
 # Plot x displacement
-plt.subplot(nplots, 1, 4)
+plt.subplot(nplots, 1, 5)
 plt.plot(t, x, label="Horizontal Displacement (m)")
 plt.xlabel("Time (s)")
 plt.ylabel("Displacement (m)")
