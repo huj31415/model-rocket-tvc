@@ -1,16 +1,20 @@
 import math
 import matplotlib.pyplot as plt
 
+
+dt = 0.01  # timestep
+
 MAX_T = 50 # time to stop sim
 CP = 0  # neutral stability
 TVC_PIVOT_DIST = 25  # TVC motor mount pivot distance
 TVC_LENGTH = 5  # Length of motor
 MAX_TV_DEFLECTION = 5  # Max motor angular deflection in degrees
-MAX_DEG_PER_SEC = 10  # Max motor deflection speed in deg/s
+MAX_DEG_PER_SEC = 50  # Max motor deflection speed in deg/s
+TVC_DELAY = 2 * dt     # how many dt to delay reaction by
 MOI = 5  # moment of inertia
 MASS = 1
 G = 9.81
-dt = 0.01  # timestep
+CD = 1 # drag coeff
 
 # Simulation state variables
 t = [0]
@@ -20,16 +24,17 @@ dx = [0]
 dy = [0]
 d2x = [0]
 d2y = [0]
-pitch = [0]  # degrees, starts at 95
+pitch = [90]
 dpitch = [0]
 d2pitch = [0]
+AoA = [0]
 tvc_deflection = [0]  # motor pitch relative to rocket
 setPitch = [90]  # pitch setpoint
 
 # PID vars - Ziegler-Nichols method
 i = 0
-Ku = 0.1
-Tu = 8.5
+Ku = 0.5
+Tu = 18.2
 KP = Ku * 0.6
 KI = Ku * 1.2 / Tu
 KD = 3 * Ku * Tu / 40
@@ -70,7 +75,7 @@ def simloop():
   else:
     tvc_angle = desired_tvc_angle
 
-  tvc_angle = max(-MAX_TV_DEFLECTION, min(MAX_TV_DEFLECTION, tvc_angle))
+  tvc_angle = max(-MAX_TV_DEFLECTION, min(MAX_TV_DEFLECTION, tvc_angle)) if t[-1] >= TVC_DELAY else 0
   tvc_deflection.append(tvc_angle)
 
   # Get thrust and forces
@@ -98,11 +103,11 @@ def simloop():
 
 
 while t[-1] < MAX_T: # and x[-1] >= 0:
-  setPitch.append(90 if t[-1] <= 25 else 0)
+  setPitch.append(90 if t[-1] <= 10 else 0)
   simloop()
 
 # Plotting
-nplots = 3
+nplots = 4
 plt.figure(figsize=(12, 8))
 
 # Plot pitch
@@ -128,6 +133,14 @@ plt.grid()
 # Plot y displacement
 plt.subplot(nplots, 1, 3)
 plt.plot(t, y, label="Vertical Displacement (m)")
+plt.xlabel("Time (s)")
+plt.ylabel("Displacement (m)")
+plt.legend()
+plt.grid()
+
+# Plot x displacement
+plt.subplot(nplots, 1, 4)
+plt.plot(t, x, label="Horizontal Displacement (m)")
 plt.xlabel("Time (s)")
 plt.ylabel("Displacement (m)")
 plt.legend()
