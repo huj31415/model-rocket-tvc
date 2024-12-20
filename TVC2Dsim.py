@@ -1,11 +1,14 @@
 import math
 import random
 import matplotlib.pyplot as plt
+from perlin_noise import PerlinNoise
+
 
 
 dt = 0.01  # timestep
 
-MAX_T = 60 # time to stop sim
+MAX_T = 120 # time to stop sim
+BURN_TIME = 60
 CP = 0  # neutral stability
 TVC_PIVOT_DIST = 25  # TVC motor mount pivot distance
 TVC_LENGTH = 5  # Length of motor
@@ -15,8 +18,12 @@ TVC_DELAY_DT = 2     # how many dt to delay reaction by
 MOI = 5  # moment of inertia
 MASS = 1
 G = 9.81
-DRAG_FACTOR = .01 # drag coeff or area or smth
+DRAG_FACTOR = .01 # for the drag equation
 RHO = 1.204 # kg/m^3
+
+
+pn = PerlinNoise(octaves=20)
+noise = [pn(0)]
 
 # Simulation state variables
 t = [0]
@@ -34,7 +41,7 @@ drag = [0]
 localF = [0]
 vNet = [0]
 vAngle = [0]
-tvc_deflection = [0]  # motor pitch relative to rocket
+tvc_deflection = [0]  # motor deflection relative to rocket
 setPitch = [90]  # pitch setpoint
 
 # PID vars - Ziegler-Nichols method
@@ -63,16 +70,19 @@ def PID(setpoint, position):
 def thrust(t):
   # return 100 if t <= MAX_T else 0     # constant thrust
   # return math.sqrt(t) * 100           # sqrt thrust
-  return math.exp(-t/10) * 100 + 10   # exponential decay thrust
+  return math.exp(-t / 10) * 100 + 10 if t <= BURN_TIME else 0   # exponential decay thrust
 
 # Simulation loop
 def simloop():
   # Increment time
   t.append(t[-1] + dt)
+  
+  # add next perlin noise step
+  noise.append(pn(t[-1] / MAX_T))
 
-  # Update TVC angle with max deflection speed
+  # Update TVC angle with max deflection speed, including noise
   prev_tvc_angle = tvc_deflection[-1]
-  desired_tvc_angle = PID(setPitch[-1], pitch[max(0,len(pitch) - TVC_DELAY_DT)])
+  desired_tvc_angle = PID(setPitch[-1], noise[-1] + pitch[max(0,len(pitch) - TVC_DELAY_DT)])
   max_deflection_step = MAX_DEG_PER_SEC * dt
 
   # Limit the rate of change of the TVC deflection
@@ -83,7 +93,8 @@ def simloop():
   else:
     tvc_angle = desired_tvc_angle
 
-  tvc_angle = max(-MAX_TV_DEFLECTION, min(MAX_TV_DEFLECTION, tvc_angle)) # if t[-1] >= TVC_DELAY_DT * dt else 0
+  # actuate TVC
+  tvc_angle = max(-MAX_TV_DEFLECTION, min(MAX_TV_DEFLECTION, tvc_angle))
   tvc_deflection.append(tvc_angle)
 
   # Get thrust and forces
@@ -120,7 +131,7 @@ def simloop():
 
 while t[-1] < MAX_T: # and x[-1] >= 0:
   # setPitch.append(90 if t[-1] <= 10 else 0)
-  setPitch.append(random.randrange(30, 150) if t[-1] % 20 <= 0.001 else setPitch[-1])
+  setPitch.append(random.randrange(30, 150) if t[-1] % 20 <= 0.001 and t[-1] < BURN_TIME else setPitch[-1])
   simloop()
 
 # Plotting
@@ -147,7 +158,6 @@ def plot(x:list, vars:list, xLabel:str, yLabel:str, labels, lims=None):
   plt.legend()
   plt.grid()
   plotIndex += 1
-  pass
 
 plot(t, [pitch, setPitch], "Time (s)", "Pitch (deg)", ["Pitch", "Pitch setpoint"], [0, MAX_T, 0, 180])
 
@@ -155,11 +165,17 @@ plot(t, dpitch, "Time (s)", "Pitch rate (deg/s)", "Pitch rate")
 
 plot(t, y, "Time (s)", "Height (m)", "Height")
 
-plot(dx, t, "Velocity (m/s)", "Time (s)", "Horizontal velocity")
+plot(x, t, "Horiz. displacement (m)", "Time (s)", "Horizontal displacement")
 
-plot(t, drag, "Time (s)", "Drag", "Drag")
+plot(x, y, "Horiz. displacement (m)", "Vert. displacement (m)", "Position")
+
+# plot(t, drag, "Time (s)", "Drag", "Drag")
 
 plot(t, AoA, "Time (s)", "AoA (rad)", "AoA")
+
+plot(t, localF, "Time (s)", "Force (N)", "Force (N)")
+
+plot(t, noise, "Time (s)", "noise", "noise")
 
 plt.tight_layout()
 
@@ -175,8 +191,8 @@ ax1.set_ylim(-90, 90)
 
 # Create second y-axis for TVC correction
 ax2 = ax1.twinx()
-ax2.set_ylabel("TVC Correction (deg)", color="tab:orange")
-ax2.plot(t, tvc_deflection, label="TVC Correction", color="tab:orange")
+ax2.set_ylabel("TVC Deflection (deg)", color="tab:orange")
+ax2.plot(t, tvc_deflection, label="TVC Deflection", color="tab:orange")
 ax2.tick_params(axis="y", labelcolor="tab:orange")
 ax2.set_ylim(-(MAX_TV_DEFLECTION + 1), (MAX_TV_DEFLECTION + 1))
 
