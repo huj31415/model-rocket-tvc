@@ -7,15 +7,16 @@ from perlin_noise import PerlinNoise
 
 dt = 0.01  # timestep
 
-MAX_T = 5 # time to stop sim, 5
-BURN_TIME = 2 # 2
+MAX_T = 50 # time to stop sim, 5
+BURN_TIME = 20 # 2
 CP = 0  # neutral stability
 TVC_PIVOT_DIST = 0.3  # TVC motor mount pivot distance
 TVC_LENGTH = 0.05  # Length of motor
 MAX_TV_DEFLECTION = 15  # Max motor angular deflection in degrees
 MAX_DEG_PER_SEC = 600 #50  # Max motor deflection speed in deg/s
+MAX_DEFLECTION_STEP = MAX_DEG_PER_SEC * dt
 TVC_DELAY_DT = 5     # how many dt to delay reaction by
-TVC_OFFSET = 1        # offset due to build inaccuracies
+TVC_OFFSET = 0 #1        # offset due to build inaccuracies
 MOI = 0.015 # 5  # moment of inertia
 MASS = 0.25 # 1
 G = 9.81
@@ -23,10 +24,15 @@ DRAG_FACTOR = .01 # for the drag equation
 RHO = 1.204 # kg/m^3
 ROT_DAMPING = 0.999  # rotation damping due to drag per dt
 
+WIND_FORCE = 1
+WIND_VEL = 5
+
 PITCH_INIT = 85
 
-pn = PerlinNoise(octaves=200)
-noise = [pn(0)]
+pn = PerlinNoise(octaves=5)
+pnoise = [pn(0)]
+
+noise = [random.random()]
 
 # Simulation state variables
 t = [0]
@@ -51,22 +57,22 @@ setPitch = [90]  # pitch setpoint
 pitchI = 0       # integral error value
 Ku = 1.44    # oscillating KP value
 Tu = 4   # oscillation period
-KP = Ku * 0.6
+KP = Ku * 0.6 - .5
 KI = Ku * 1.2 / Tu
 KD = 3 * Ku * Tu / 40
 # KP = 1.44
 # KI = 0
 # KD = 0
-pitchErr = [0]
+pitchErr = [setPitch[0] - pitch[0]]
 
 dxErr = [0]
 dxI = 0
 dxPID = [0]
 dxKu = 7.27
 dxTu = 1.9
-dxKP = dxKu * 0.6
+dxKP = dxKu * 0.6 #- 3
 dxKI = dxKu * 1.2 / dxTu
-dxKD = 3 * dxKu * dxTu / 40
+dxKD = -3 * dxKu * dxTu / 40
 
 def PID(setpoint:float, position:float, KP:float, KI:float, KD:float, err:list[float], i:float):
   # global i # , prev_err
@@ -90,7 +96,8 @@ def simloop():
   t.append(t[-1] + dt)
   
   # add next perlin noise step
-  noise.append(pn(t[-1] / MAX_T))
+  pnoise.append(pn(t[-1] / MAX_T))
+  noise.append(random.random())
   
   dxPID.append(PID(0, dx[-1], dxKP, dxKI, dxKD, dxErr, dxI))
   setPitch.append(90 - dxPID[-1]) #PID(0, dy[-1], 1, 0, 0, dyErr, dyI))
@@ -98,13 +105,12 @@ def simloop():
   # Update TVC angle with max deflection speed, including noise
   prev_tvc_angle = tvc_deflection[-1]
   desired_tvc_angle = PID(setPitch[-1], pitch[max(0,len(pitch) - TVC_DELAY_DT)], KP, KI, KD, pitchErr, pitchI) #pitch + noise[-1]
-  max_deflection_step = MAX_DEG_PER_SEC * dt
 
   # Limit the rate of change of the TVC deflection
-  if desired_tvc_angle > prev_tvc_angle + max_deflection_step:
-    tvc_angle = prev_tvc_angle + max_deflection_step
-  elif desired_tvc_angle < prev_tvc_angle - max_deflection_step:
-    tvc_angle = prev_tvc_angle - max_deflection_step
+  if desired_tvc_angle > prev_tvc_angle + MAX_DEFLECTION_STEP:
+    tvc_angle = prev_tvc_angle + MAX_DEFLECTION_STEP
+  elif desired_tvc_angle < prev_tvc_angle - MAX_DEFLECTION_STEP:
+    tvc_angle = prev_tvc_angle - MAX_DEFLECTION_STEP
   else:
     tvc_angle = desired_tvc_angle
 
@@ -119,15 +125,15 @@ def simloop():
   
   # Forces in local coordinates
   # Drag force
-  vAngle.append(math.atan2(dy[-1], dx[-1]))
-  vNet.append(math.hypot(dx[-1], dy[-1]))
-  AoA.append(math.radians(pitch[-1]) - vAngle[-1])
-  drag.append(0.5 * DRAG_FACTOR * math.cos(AoA[-1]) * vNet[-1] * vNet[-1] * RHO)
+  # vAngle.append(math.atan2(dy[-1], dx[-1]))
+  # vNet.append(math.hypot(dx[-1], dy[-1]))
+  # AoA.append(math.radians(pitch[-1]) - vAngle[-1])
+  # drag.append(0.5 * DRAG_FACTOR * math.cos(AoA[-1]) * vNet[-1] * vNet[-1] * RHO)
   # Add rocket force - drag force
   localF.append(F * math.cos(tvc_rad))# - drag[-1]
   
   # Acceleration from force
-  d2x.append(localF[-1] * math.cos(pitch_rad) / MASS)
+  d2x.append(localF[-1] * math.cos(pitch_rad) / MASS + WIND_FORCE / MASS * (WIND_VEL * pnoise[-1] - dx[-1]))
   d2y.append(localF[-1] * math.sin(pitch_rad) / MASS - G)
 
   # Angular acceleration
@@ -183,7 +189,7 @@ plot(t, y, "Time (s)", "Height (m)", "Height")
 
 plot(x, t, "Horiz. displacement (m)", "Time (s)", "Horizontal displacement")
 
-plot(x, y, "Horiz. displacement (m)", "Vert. displacement (m)", "Position")
+plot(x, y, "Horiz. displacement (m)", "Vert. displacement (m)", "Position", lims=[min(-max(y)/2, min(x)), max(max(y)/2, max(x)), 0, max(y)])
 
 # plot(t, AoA, "Time (s)", "AoA (rad)", "AoA")
 
