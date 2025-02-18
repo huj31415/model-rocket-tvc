@@ -91,6 +91,76 @@ typedef Vector3<float> Vector3f;
 typedef Vector3<double> Vector3d;
 
 /*
+   Vector2 Class
+   -------------
+   A 2-dimensional vector with common operations.
+*/
+template <typename T>
+class Vector2
+{
+public:
+  T x, y;
+
+  // Constructors
+  Vector2() : x(0), y(0) {}
+  Vector2(T x, T y) : x(x), y(y) {}
+
+  // Common vectors
+  static Vector2 Zero() { return Vector2(0, 0); }
+  static Vector2 UnitX() { return Vector2(1, 0); }
+  static Vector2 UnitY() { return Vector2(0, 1); }
+
+  // Magnitude and normalization
+  T length() const { return sqrt(x * x + y * y); }
+  T lengthSquared() const { return x * x + y * y; }
+  Vector2 normalized() const
+  {
+    T len = length();
+    if (len == 0)
+      return Vector2(0, 0);
+    return Vector2(x / len, y / len);
+  }
+
+  // Operator overloads for vector arithmetic
+  Vector2 operator+(const Vector2 &v) const { return Vector2(x + v.x, y + v.y); }
+  Vector2 operator-(const Vector2 &v) const { return Vector2(x - v.x, y - v.y); }
+  Vector2 operator*(T scalar) const { return Vector2(x * scalar, y * scalar); }
+  Vector2 operator/(T scalar) const { return Vector2(x / scalar, y / scalar); }
+
+  Vector2 &operator+=(const Vector2 &v)
+  {
+    x += v.x;
+    y += v.y;
+    return *this;
+  }
+  Vector2 &operator-=(const Vector2 &v)
+  {
+    x -= v.x;
+    y -= v.y;
+    return *this;
+  }
+  Vector2 &operator*=(T scalar)
+  {
+    x *= scalar;
+    y *= scalar;
+    return *this;
+  }
+  Vector2 &operator/=(T scalar)
+  {
+    x /= scalar;
+    y /= scalar;
+    return *this;
+  }
+
+  // Dot product
+  T dot(const Vector2 &v) const { return x * v.x + y * v.y; }
+};
+
+// Convenient typedefs for float and double versions
+typedef Vector2<float> Vector2f;
+typedef Vector2<double> Vector2d;
+
+/*
    Quaternion Class
    ----------------
    A quaternion class for representing rotations.

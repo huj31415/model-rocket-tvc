@@ -1,19 +1,19 @@
 #include <Arduino.h>
-
+// Servo
 #include <Servo.h>
-
+// MPU
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
 #include <Wire.h>
-
+// Vectors and quaternions
 #include "VectorMath.h"
 
-// time increment
+// time increment in sec
 double dt;
 // loop start time in micros
 unsigned long start;
 // current time in micros
-unsigned long currentTime;
+unsigned long elapsedTime;
 
 // Servo variables
 
@@ -37,33 +37,41 @@ const int S2_MIN = -80;
 const int minDef = -25;
 const int maxDef = 25;
 
-// IMU and state variables
-
 // Create IMU
 Adafruit_MPU6050 mpu;
 
+// State variables
+
 // Position vector
-Vector3d localPos = Vector3d::Zero();
+Vector3d pos = Vector3d::Zero();
 // Velocity vector
-Vector3d localVel = Vector3d::Zero();
+Vector3d vel = Vector3d::Zero();
 // Acceleration vector
 Vector3d localAccel = Vector3d::Zero();
+Vector3d globalAccel = Vector3d::Zero();
+// Initial gravity vector
+Vector3d gravity = Vector3d::Zero();
 
 // Local angular velocity
 Vector3d omega = Vector3d::Zero();
-// Local angular position
-// Vector3d localRot = Vector3d::Zero();
+// Euler rotation
+Vector3d eulerRot = Vector3d::Zero();
 // Local decoupled angular position
 Vector3d decoupledRot = Vector3d::Zero();
 // Initial angular velocity error
 Vector3d omegaErr = Vector3d::Zero();
-// Global rotation
+// Rotation from body frame to world frame
 QuaternionD globalRot = QuaternionD::Identity();
-// Initial rotation
+// Initial rotation of the rocket
 QuaternionD initialRot = QuaternionD::Identity();
 
 // Sensor outputs
 sensors_event_t a, g, temp;
+
+// PID vars
+Vector2d PIDErr = Vector2d::Zero();
+Vector2d PIDInt = Vector2d::Zero();
+double KP = 0, KI = 0, KD = 0;
 
 struct FourBarParams {
   double a, b, c, d, n, zero;
@@ -107,10 +115,10 @@ const FourBarParams outer = FourBarParams(
 /**
  * Converts target output angle to required servo angle using 4-bar linkage
  * @param t Target output angle
- * @param ax dimensions and parameters of the 4-bar linkage
+ * @param ax Dimensions and parameters of the 4-bar linkage
  * @returns Servo angle required for the target angle
  */
-double getServoAngle(double t, FourBarParams ax) {
+double getServoAngleFromTargetAngle(double t, FourBarParams ax) {
   t = -t - 90.;// + ax.n; // if n is in degrees
   double trad = radians(t + ax.n); // if n is in rad
   double f = sqrt(ax.aSqr + ax.dSqr - ax.ad2 * cos(trad));
@@ -125,9 +133,9 @@ double getServoAngle(double t, FourBarParams ax) {
  * @param val1 Inner axis target angle
  * @param val2 Outer axis target angle
  */
-void actuateMotor(int val1, int val2) {
-  servo1.write(90 + min(max((int)(inner.inv * getServoAngle(val1, inner)), S1_MIN), S1_MAX));
-  servo2.write(90 + min(max((int)(outer.inv * getServoAngle(val2, outer)), S2_MIN), S2_MAX));
+void actuateServos(int val1, int val2) {
+  servo1.write(90 + min(max((int)(inner.inv * getServoAngleFromTargetAngle(val1, inner)), S1_MIN), S1_MAX));
+  servo2.write(90 + min(max((int)(outer.inv * getServoAngleFromTargetAngle(val2, outer)), S2_MIN), S2_MAX));
 }
 
 /**
@@ -145,98 +153,136 @@ void init6050() {
 }
 
 /**
- * Integrates motion twice with semi-implicit Euler's method
- * @param accel Current accleration vector
- * @param vel Reference to velocity vector
- * @param pos Reference to position vector
- * @param dt Timestep
+ * Calibrate the sensor with an average reading over (iter/100) seconds,
+ * sets initial rotation to the angle of the gravity vector, and
+ * sets gravity strength to the magnitude of acceleration
+ * @param iter The number of iterations to average over, separated by 10 ms
  */
-void updatePos(Vector3d accel, Vector3d& vel, Vector3d& pos, double dt) {
-  vel += accel * dt;
+void calibrateSensors(int iter) {
+  Vector3d accel = Vector3d::Zero();
+  Vector3d gyro = Vector3d::Zero();
+  // Average over iter iterations
+  for (int i = 0; i < iter; i++) {
+    mpu.getEvent(&a, &g, &temp);
+    accel += Vector3d::fromSensorData(a.acceleration);
+    gyro += Vector3d::fromSensorData(g.gyro);
+    delay(10);
+  }
+  accel /= iter;
+  gyro /= iter;
+
+  // Set initialRot to the angle of the gravity vector
+  initialRot = QuaternionD::fromEulerAngles(
+    atan2(accel.y, accel.z),
+    atan2(-accel.x, sqrt(accel.y * accel.y + accel.z * accel.z)),
+    0
+  );
+
+  // Set gravity strength to the magnitude of acceleration
+  gravity.z = accel.length();
+}
+
+/**
+ * Updates the current physical state of the rocket
+ */
+void updateState() {
+  // Update sensor readings
+  mpu.getEvent(&a, &g, &temp);
+
+  // --- Update rotation ---
+  // Get current angular velocity and prepare for quaternion derivative
+  omega = Vector3d::fromSensorData(g.gyro) * 0.5 * dt;
+  // Integrate by the quaternion derivative
+  QuaternionD dq = QuaternionD(1, omega.x, omega.y, omega.z).normalized();
+  globalRot = (globalRot * dq).normalized(); // globalRot * dq -> body to world, dq * globalRot -> world to body
+  // Convert to world frame -> local frame Euler angles
+  eulerRot = globalRot.inverse().toEulerAngles();
+  // --- Decouple rotation axes ---
+  // decoupledRot.z = cos(eulerRot.x) * eulerRot.z - sin(eulerRot.x) * eulerRot.y;
+  // decoupledRot.y = cos(eulerRot.x) * eulerRot.y + sin(eulerRot.x) * eulerRot.z;
+  decoupledRot = (QuaternionD::fromEulerAngles(eulerRot.x, 0, 0).conjugate() * globalRot).toEulerAngles();
+  decoupledRot.x = eulerRot.x;
+  
+
+  // --- Update translation ---
+  // Get current acceleration
+  localAccel = Vector3d::fromSensorData(a.acceleration);
+  // Rotate acceleration to world frame
+  globalAccel = globalRot.rotate(localAccel) - gravity;
+  // Integrate position using rotated acceleration
+  vel += globalAccel * dt;
   pos += vel * dt;
 }
 
 /**
- * Integrates rotation
- * @param omega Current angular velocity in x, y, z
- * @param globalRot Reference to current global rotation
- * @param decoupledRot Reference to current roll-decoupled rotation
+ * Pair of one-dimensional PIDs
+ * @param setpoint Setpoint in pitch and yaw angles
+ * @param position Current position in pitch and yaw angles
+ * @returns Correction angle in pitch and yaw in the same units
  */
-void updateRot(Vector3d omega, QuaternionD& globalRot, Vector3d& decoupledRot, double dt) {
-  // globalRot *= (QuaternionD(0, omega.x, omega.y, omega.z) * dt).normalized();
-  globalRot = (initialRot + (initialRot * QuaternionD(0, omega.x, omega.y, omega.z) / 2) * dt).normalized();
-  Vector3d eulerRot = globalRot.toEulerAngles();
-  decoupledRot.z = cos(eulerRot.x) * eulerRot.z - sin(eulerRot.x) * eulerRot.y;
-  decoupledRot.y = cos(eulerRot.x) * eulerRot.y + sin(eulerRot.x) * eulerRot.z;
+Vector2d PID1d(Vector2d setpoint, Vector2d position) {
+  static Vector2d newError = setpoint - position;
+  Vector2d p = newError * KP;
+  PIDInt += newError * KI * dt;
+  Vector2d d = (newError - PIDErr) * KD / dt;
+  PIDErr = newError;
+  return p + PIDInt + d;
 }
 
-/**
- * Averages acceleration or gyro sensor readings over a specified duration
- * @param ms Time in ms to average over
- * @param type Data type, 'a' -> acceleration, 'g' -> gyro
- * @returns The average value of the sensor, or Vector3d::Zero() if type isn't 'a' or 'g'
- */
-Vector3d sensorAverage(unsigned int ms, char type) {
-  unsigned int start = millis();
-  Vector3d out = Vector3d::Zero();
-  for (unsigned int t = start; t < start + ms; t = millis()) {
-    mpu.getEvent(&a, &g, &temp);
-    sensors_vec_t data = a.acceleration;
-    switch (type) {
-      case 'a':
-        data = a.acceleration;
-        break;
-      case 'g':
-        data = g.gyro;
-        break;
-    }
-    out += Vector3d::fromSensorData(data);
-  }
-  return out / ms;
+void printQuaternion(QuaternionD q) {
+  Serial.printf("Quat(%.2f, %.2f, %.2f, %.2f)\n", q.w, q.x, q.y, q.z);
 }
-
-Vector3d kalmanFilter(sensors_vec_t raw) {
-  Vector3d out = Vector3d::fromSensorData(raw);
-  return out;
+void printVector(Vector3d v) {
+  Serial.printf("Vec3(%.2f, %.2f, %.2f)\n", v.x, v.y, v.z);
 }
 
 void setup() {
   Serial.begin(9600);
-  Serial.println("Begin");
 
   // init servos
   servo1.attach(2, MIN_PULSE, MAX_PULSE);  // servo1 -> pin IO2 //4
   servo2.attach(0, MIN_PULSE, MAX_PULSE);  // servo2 -> pin IO0 //2
   // set motor to vertical
-  actuateMotor(0, 0);
+  actuateServos(0, 0);
 
   init6050();
 
   delay(1000);
 
-  omegaErr = sensorAverage(2000, 'g');
-  Vector3d initAccel = sensorAverage(2000, 'a');
-  initialRot = QuaternionD::fromEulerAngles(0, initAccel.y, initAccel.z);
+  calibrateSensors(200);
 
+  Serial.println("Loop start");
   start = micros();
-  currentTime = start;
+  elapsedTime = 0;
 }
+
+unsigned long lastTime = 0;
 
 void loop() {
   // Update dt
-  dt = (micros() - currentTime) / 1.e6;
-  currentTime = micros() - start;
+  dt = ((micros() - start) - elapsedTime) / 1.e6;
+  elapsedTime = micros() - start;
 
-  // Get sensor readings
-  mpu.getEvent(&a, &g, &temp);
+  updateState();
 
-  // Update motion
-  localAccel = Vector3d::fromSensorData(a.acceleration);
-  updatePos(localAccel, localVel, localPos, dt);
 
-  // Update rotation
-  omega = Vector3d::fromSensorData(g.gyro);
-  updateRot(omega, globalRot, decoupledRot, dt);
+  if (elapsedTime - lastTime >= 1e6) {
+    lastTime = elapsedTime;
+    Serial.println(dt);
+    Serial.print("pos: ");
+    printVector(pos);
+    Serial.print("Vel: ");
+    printVector(vel);
+    Serial.print("Accel: ");
+    printVector(localAccel);
+    Serial.print("Ang vel: ");
+    printVector(omega);
+    Serial.print("Global rot: ");
+    printQuaternion(globalRot);
+    Serial.print("Decoupled rot: ");
+    printVector(decoupledRot);
+  }
+  // if (elapsedTime / 5e6 > 1) delay(10000);
 
-  delay(500);
+  // delay(500);
 }
