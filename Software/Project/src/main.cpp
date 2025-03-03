@@ -13,14 +13,13 @@
 #include <ESP8266WiFi.h>
 // Vectors and quaternions
 #include "VectorMath.h"
+#include "networkauth.h"
 
 #define INNER_SERVO_PIN 2
 #define OUTER_SERVO_PIN 0
 #define SD_CS_PIN 16 //15
 #define BUTTON_PIN 15 //16
 
-#define WIFI_SSID "SSID"
-#define WIFI_PASSWORD "PASSWORD"
 
 // enum State
 // {
