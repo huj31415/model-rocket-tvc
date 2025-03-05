@@ -130,7 +130,7 @@ struct FourBarParams
 // 4 bar linkage definitions, in mm
 
 // Inner axis dimensions
-const FourBarParams inner = FourBarParams(
+const FourBarParams inner = {
     40.0,              // output arm
     27.0,              // connecting arm //27.7
     16.5,              // servo arm //18.5
@@ -138,9 +138,10 @@ const FourBarParams inner = FourBarParams(
     atan2(21.365, 21), // angle from D to vertical, originally reversed
     -24.263749,        // value to set function to 0 at t=0
     1                  // don't invert angle
-);
+};
+
 // Outer axis dimensions
-const FourBarParams outer = FourBarParams(
+const FourBarParams outer = {
     40.0,              // output arm
     28.8,              // connecting arm
     16.5,              // servo arm
@@ -148,7 +149,7 @@ const FourBarParams outer = FourBarParams(
     atan2(22.3, 20.9), // angle from D to vertical, originally reversed
     -24.475072,        // value to set function to 0 at t=0
     -1                 // invert angle
-);
+};
 
 /**
  * Clamps a number between a min and max
