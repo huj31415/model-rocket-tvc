@@ -1,0 +1,135 @@
+
+/**
+ * Quaternion-based PID
+ * @param setpoint Setpoint quaternion
+ * @param position Current position quaternion
+ * @returns Correction angular velocity in pitch and yaw in rad/s
+ */
+Vector2d QuaternionPID(QuaternionD setpoint)
+{
+  static Vector2d prevErr = Vector2d::Zero();
+  static Vector2d errorI = Vector2d::Zero();
+
+  QuaternionD position = (QuaternionD::fromEuler(0, 0, (globalRot.conjugate().toEuler()).z).conjugate() * globalRot);
+
+  // Calculate error quaternion
+  QuaternionD qError = (position.conjugate() * setpoint).normalized();
+
+  // Extract rotation axis and angle from error quaternion
+  Vector3d errorAxis;
+  double errorAngle;
+
+  // Convert quaternion to axis-angle representation
+  if (abs(qError.w) > 0.9999)
+  {
+    // Handle case where error is very small
+    errorAxis = Vector3d(qError.x, qError.y, qError.z);
+    errorAngle = 2.0; // For small angles, we approximate
+  }
+  else
+  {
+    errorAngle = 2.0 * acos(qError.w);
+    double sinHalfAngle = sin(errorAngle / 2.0);
+    errorAxis = Vector3d(qError.x, qError.y, qError.z) / sinHalfAngle;
+    errorAxis *= errorAngle; // Scale by angle to get angular error
+  }
+
+  // Extract just the X and Y components (pitch and yaw)
+  Vector2d errorP = Vector2d(errorAxis.x, errorAxis.y);
+
+  // Standard PID calculation in global frame
+  errorI += errorP * dt;
+  Vector2d errorD = (errorP - prevErr) / (dt * (1 + N * dt / 2));
+  prevErr = errorP;
+
+  Vector2d output = errorP * KP + errorI * KI + errorD * KD;
+
+  // Anti-windup
+  double magnitude = output.length();
+  if (magnitude > deflectionLimit)
+  {
+    Vector2d satOutput = output * (deflectionLimit / magnitude);
+    Vector2d windupErr = (satOutput - output) / KI;
+    errorI += windupErr * (dt / Tt);
+    output = satOutput;
+  }
+
+  return output;
+}
+
+// Vector2d QuaternionPID(QuaternionD setpoint, QuaternionD position)
+// {
+//   static Vector2d prevErr = Vector2d::Zero();
+//   static Vector2d errorI = Vector2d::Zero();
+//   // Finds quaternion Qe such that Qe * position = setpoint
+//   QuaternionD qError = (position.conjugate() * setpoint).normalized();
+//   // // Get the overall rotation error angle
+//   double theta = 2.0 * acos(qError.w);
+//   // Vector3d errEuler = qError.toEuler();
+//   // Vector2d errorP(errEuler.x, errEuler.y);
+//   // Compute the rotation axis with small angle approximation
+//   Vector3d axis;
+//   if (fabs(theta) > 1e-3)
+//   {
+//     axis = Vector3d(qError.x, qError.y, qError.z) / sin(theta / 2.0);
+//   }
+//   else
+//   {
+//     axis = Vector3d(qError.x, qError.y, qError.z);
+//   }
+//   // --- Decouple roll by projection ---
+//   Vector3d rollAxis(0, 0, 1);
+//   // Project the error axis onto the plane orthogonal to rollAxis:
+//   Vector3d projAxis = axis - rollAxis * (axis.dot(rollAxis));
+//   // The length of the projected axis gives the fraction of the rotation
+//   // that lies in the pitch-yaw plane. Thus, the effective error angle is:
+//   double effectiveAngle = theta * projAxis.length(); // theta * sin(phi)
+//   // Create a 2D error vector (pitch and yaw) from the projection.
+//   Vector2d errorP;
+//   if (projAxis.length() > 1e-6)
+//   {
+//     Vector3d projNormalized = projAxis / projAxis.length();
+//     // Map the 3D projection's x and y components to pitch and yaw.
+//     errorP = Vector2d(projNormalized.x, projNormalized.y) * effectiveAngle;
+//   }
+//   else
+//   {
+//     errorP = Vector2d::Zero();
+//   }
+//   // Standard PID
+//   errorI += errorP * dt;
+//   Vector2d errorD = (errorP - prevErr) / (dt * (1 + N * dt / 2));
+//   prevErr = errorP;
+//   Vector2d output = errorP * KP + errorI * KI + errorD * KD;
+//   // Integral anti-windup
+//   double magnitude = output.length();
+//   if (magnitude > deflectionLimit)
+//   {
+//     // Calculate saturated output
+//     Vector2d satOutput = output * (deflectionLimit / magnitude);
+//     // Back-calculation
+//     Vector2d windupErr = (satOutput - output) / KI;
+//     errorI += windupErr * (dt / Tt);
+//     // Apply saturated output
+//     output = satOutput;
+//   }
+//   return output;
+// }
+
+
+
+void test()
+{
+  actuateServos(Vector2d(-deflectionLimit, 0));
+  delay(250);
+  actuateServos(Vector2d(deflectionLimit, 0));
+  delay(250);
+  actuateServos(Vector2d(0, 0));
+  delay(250);
+  actuateServos(Vector2d(0, deflectionLimit));
+  delay(250);
+  actuateServos(Vector2d(0, -deflectionLimit));
+  delay(250);
+  actuateServos(Vector2d(0, 0));
+  delay(500);
+}

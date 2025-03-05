@@ -11,9 +11,9 @@
 // OTA update
 #include <ArduinoOTA.h>
 #include <ESP8266WiFi.h>
+#include "networkauth.h" // for network ssid and password
 // Vectors and quaternions
 #include "VectorMath.h"
-#include "networkauth.h"
 
 #define INNER_SERVO_PIN 2
 #define OUTER_SERVO_PIN 0
@@ -35,6 +35,11 @@ double dt;
 unsigned long start;
 // current time in micros
 unsigned long elapsedTime;
+
+unsigned long lastSaveTime = 0;
+// SD card file save interval in us
+const double saveInterval = 5 * 1e6;
+
 
 // Servo variables
 
@@ -60,8 +65,6 @@ const double deflectionLimit = radians(15);
 // Create IMU
 Adafruit_MPU6050 mpu;
 
-// SD card file save interval in us
-const double saveInterval = 5 * 1e6;
 
 // State variables
 
@@ -90,7 +93,7 @@ QuaternionD initialRot = QuaternionD::Identity();
 
 // PID setpoint, set to vertical and const for now
 const Vector2d setpointV = Vector2d::Zero();
-const QuaternionD setpointQ = QuaternionD::Identity();
+// const QuaternionD setpointQ = QuaternionD::Identity();
 
 // Sensor outputs
 sensors_event_t a, g, temp;
@@ -147,6 +150,9 @@ const FourBarParams outer = FourBarParams(
     -1                 // invert angle
 );
 
+/**
+ * Clamps a number between a min and max
+ */
 double clamp(double x, double low, double high)
 {
   return min(max(x, low), high);
@@ -181,47 +187,18 @@ void actuateServos(Vector2d v)
 }
 
 /**
- * Attempts to initialize the MPU6050 and waits if it fails
+ * Initialize servos and set angle to 0
  */
-void init6050()
-{
-  // init MPU6050, SCL -> IO5, SDA -> IO4
-  while (!mpu.begin())
-  {
-    Serial.println("Failed to init MPU6050");
-    delay(1000);
-  }
-  mpu.setAccelerometerRange(MPU6050_RANGE_8_G); // 2,4,8,16
-  mpu.setGyroRange(MPU6050_RANGE_500_DEG);      // 250,500,1000,2000
-  mpu.setFilterBandwidth(MPU6050_BAND_10_HZ);   // 260,184,94,44,21,10,5
+void initServos() {
+  // init servos
+  servoInner.attach(INNER_SERVO_PIN, MIN_PULSE, MAX_PULSE); // servoInner -> pin IO2 //2
+  servoOuter.attach(OUTER_SERVO_PIN, MIN_PULSE, MAX_PULSE); // servoOuter -> pin IO0 //0
+  // set motor to vertical
+  actuateServos(Vector2d::Zero());
 }
 
 /**
- * Initialize SD card, open file, and write CSV headers
- */
-void initSD()
-{
-  unsigned int fileNum = 0;
-
-  while (!SD.begin(SD_CS_PIN))
-  {
-    Serial.println("Failed to initialize SD");
-    delay(1000);
-  }
-  char fileNameBuf[32];
-  sprintf(fileNameBuf, "TVCData/data%d.csv", fileNum);
-  while (SD.exists(fileNameBuf))
-  {
-    fileNum++;
-    sprintf(fileNameBuf, "TVCData/data%d.csv", fileNum);
-  }
-  dataFile = SD.open(fileNameBuf, FILE_WRITE);
-  Serial.printf("Writing to file %s\n", fileNameBuf);
-  dataFile.println("T(us),Qw,Qx,Qy,Qz,ErrX(rad),ErrY(rad),TVCX(rad),TVCY(rad)");
-}
-
-/**
- * Initialize OTA updates
+ * Attempts to initialize OTA updates
  */
 void initOTA()
 {
@@ -242,6 +219,52 @@ void initOTA()
   Serial.println(WiFi.localIP());
   // Enable OTA
   ArduinoOTA.begin();
+  // check for ota updates
+  ArduinoOTA.handle();
+}
+
+/**
+ * Attempts to initialize the MPU6050
+ */
+void initMPU6050()
+{
+  // init MPU6050, SCL -> IO5, SDA -> IO4
+  while (!mpu.begin())
+  {
+    Serial.println("Failed to init MPU6050");
+    // check for ota updates
+    ArduinoOTA.handle();
+    delay(1000);
+  }
+  mpu.setAccelerometerRange(MPU6050_RANGE_8_G); // 2,4,8,16
+  mpu.setGyroRange(MPU6050_RANGE_500_DEG);      // 250,500,1000,2000
+  mpu.setFilterBandwidth(MPU6050_BAND_10_HZ);   // 260,184,94,44,21,10,5
+}
+
+/**
+ * Attempts to initialize SD card, open file, and write CSV headers
+ */
+void initSD()
+{
+  unsigned int fileNum = 0;
+
+  while (!SD.begin(SD_CS_PIN))
+  {
+    Serial.println("Failed to initialize SD");
+    // check for ota updates
+    ArduinoOTA.handle();
+    delay(1000);
+  }
+  char fileNameBuf[32];
+  sprintf(fileNameBuf, "TVCData/data%d.csv", fileNum);
+  while (SD.exists(fileNameBuf))
+  {
+    fileNum++;
+    sprintf(fileNameBuf, "TVCData/data%d.csv", fileNum);
+  }
+  dataFile = SD.open(fileNameBuf, FILE_WRITE);
+  Serial.printf("Writing to file %s\n", fileNameBuf);
+  dataFile.println("T(us),Qw,Qx,Qy,Qz,ErrX(rad),ErrY(rad),TVCX(rad),TVCY(rad)");
 }
 
 /**
@@ -292,12 +315,14 @@ void waitForLaunch(double threshold = 1., double freq = 500)
   {
     mpu.getEvent(&a, &g, &temp);
     delay(period);
+    // check for ota updates
+    ArduinoOTA.handle();
   }
   return;
 }
 
 /**
- * Updates the current physical state of the rocket
+ * Updates the current rotation quaternion of the rocket
  */
 void updateState()
 {
@@ -363,140 +388,9 @@ Vector2d AxesPID(Vector2d setpoint)
 }
 
 /**
- * Quaternion-based PID
- * @param setpoint Setpoint quaternion
- * @param position Current position quaternion
- * @returns Correction angular velocity in pitch and yaw in rad/s
+ * Closes the file and restarts ESP8266 when the interrupt button is pressed
  */
-Vector2d QuaternionPID(QuaternionD setpoint)
-{
-  static Vector2d prevErr = Vector2d::Zero();
-  static Vector2d errorI = Vector2d::Zero();
-
-  QuaternionD position = (QuaternionD::fromEuler(0, 0, (globalRot.conjugate().toEuler()).z).conjugate() * globalRot);
-
-  // Calculate error quaternion
-  QuaternionD qError = (position.conjugate() * setpoint).normalized();
-
-  // Extract rotation axis and angle from error quaternion
-  Vector3d errorAxis;
-  double errorAngle;
-
-  // Convert quaternion to axis-angle representation
-  if (abs(qError.w) > 0.9999)
-  {
-    // Handle case where error is very small
-    errorAxis = Vector3d(qError.x, qError.y, qError.z);
-    errorAngle = 2.0; // For small angles, we approximate
-  }
-  else
-  {
-    errorAngle = 2.0 * acos(qError.w);
-    double sinHalfAngle = sin(errorAngle / 2.0);
-    errorAxis = Vector3d(qError.x, qError.y, qError.z) / sinHalfAngle;
-    errorAxis *= errorAngle; // Scale by angle to get angular error
-  }
-
-  // Extract just the X and Y components (pitch and yaw)
-  Vector2d errorP = Vector2d(errorAxis.x, errorAxis.y);
-
-  // Standard PID calculation in global frame
-  errorI += errorP * dt;
-  Vector2d errorD = (errorP - prevErr) / (dt * (1 + N * dt / 2));
-  prevErr = errorP;
-
-  Vector2d output = errorP * KP + errorI * KI + errorD * KD;
-
-  // Anti-windup
-  double magnitude = output.length();
-  if (magnitude > deflectionLimit)
-  {
-    Vector2d satOutput = output * (deflectionLimit / magnitude);
-    Vector2d windupErr = (satOutput - output) / KI;
-    errorI += windupErr * (dt / Tt);
-    output = satOutput;
-  }
-
-  return output;
-}
-
-// Vector2d QuaternionPID(QuaternionD setpoint, QuaternionD position)
-// {
-//   static Vector2d prevErr = Vector2d::Zero();
-//   static Vector2d errorI = Vector2d::Zero();
-//   // Finds quaternion Qe such that Qe * position = setpoint
-//   QuaternionD qError = (position.conjugate() * setpoint).normalized();
-//   // // Get the overall rotation error angle
-//   double theta = 2.0 * acos(qError.w);
-//   // Vector3d errEuler = qError.toEuler();
-//   // Vector2d errorP(errEuler.x, errEuler.y);
-//   // Compute the rotation axis with small angle approximation
-//   Vector3d axis;
-//   if (fabs(theta) > 1e-3)
-//   {
-//     axis = Vector3d(qError.x, qError.y, qError.z) / sin(theta / 2.0);
-//   }
-//   else
-//   {
-//     axis = Vector3d(qError.x, qError.y, qError.z);
-//   }
-//   // --- Decouple roll by projection ---
-//   Vector3d rollAxis(0, 0, 1);
-//   // Project the error axis onto the plane orthogonal to rollAxis:
-//   Vector3d projAxis = axis - rollAxis * (axis.dot(rollAxis));
-//   // The length of the projected axis gives the fraction of the rotation
-//   // that lies in the pitch-yaw plane. Thus, the effective error angle is:
-//   double effectiveAngle = theta * projAxis.length(); // theta * sin(phi)
-//   // Create a 2D error vector (pitch and yaw) from the projection.
-//   Vector2d errorP;
-//   if (projAxis.length() > 1e-6)
-//   {
-//     Vector3d projNormalized = projAxis / projAxis.length();
-//     // Map the 3D projection's x and y components to pitch and yaw.
-//     errorP = Vector2d(projNormalized.x, projNormalized.y) * effectiveAngle;
-//   }
-//   else
-//   {
-//     errorP = Vector2d::Zero();
-//   }
-//   // Standard PID
-//   errorI += errorP * dt;
-//   Vector2d errorD = (errorP - prevErr) / (dt * (1 + N * dt / 2));
-//   prevErr = errorP;
-//   Vector2d output = errorP * KP + errorI * KI + errorD * KD;
-//   // Integral anti-windup
-//   double magnitude = output.length();
-//   if (magnitude > deflectionLimit)
-//   {
-//     // Calculate saturated output
-//     Vector2d satOutput = output * (deflectionLimit / magnitude);
-//     // Back-calculation
-//     Vector2d windupErr = (satOutput - output) / KI;
-//     errorI += windupErr * (dt / Tt);
-//     // Apply saturated output
-//     output = satOutput;
-//   }
-//   return output;
-// }
-
-void test()
-{
-  actuateServos(Vector2d(-deflectionLimit, 0));
-  delay(250);
-  actuateServos(Vector2d(deflectionLimit, 0));
-  delay(250);
-  actuateServos(Vector2d(0, 0));
-  delay(250);
-  actuateServos(Vector2d(0, deflectionLimit));
-  delay(250);
-  actuateServos(Vector2d(0, -deflectionLimit));
-  delay(250);
-  actuateServos(Vector2d(0, 0));
-  delay(500);
-}
-
-IRAM_ATTR
-void reset_ISR() {
+IRAM_ATTR void reset_ISR() {
   dataFile.close();
   ESP.restart();
 }
@@ -506,15 +400,13 @@ void setup()
   Serial.begin(74880);
   Serial.println();
 
-  // init servos
-  servoInner.attach(INNER_SERVO_PIN, MIN_PULSE, MAX_PULSE); // servoInner -> pin IO2 //2
-  servoOuter.attach(OUTER_SERVO_PIN, MIN_PULSE, MAX_PULSE); // servoOuter -> pin IO0 //0
-  // set motor to vertical
-  actuateServos(Vector2d::Zero());
-
+  // Initialize everything
+  initServos();
 
   initOTA();
-  init6050();
+
+  initMPU6050();
+
   initSD();
 
   attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), reset_ISR, FALLING);
@@ -523,17 +415,12 @@ void setup()
 
   calibrateSensors(200);
 
-  Serial.print("Init rot: ");
-  Serial.println(initialRot.toString());
-
   // waitForLaunch();
 
   Serial.println("Loop start");
-  start = micros();
   elapsedTime = 0;
+  start = micros();
 }
-
-unsigned long lastSaveTime = 0;
 
 void loop()
 {
