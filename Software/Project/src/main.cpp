@@ -105,8 +105,8 @@ File dataFile;
 // Vector2d PIDErr = Vector2d::Zero();
 // Vector2d PIDInt = Vector2d::Zero();
 // PID gains, derivative filter, and anti-windup constant
-const double KU = 1, TU = 1;
-const double KP = 0.6 * KU, KI = 1.2 * KU / TU, KD = 3.0 * KU * TU / 40.0, N = 10, Tt = 1.0;
+double KU = 1, TU = 1, N = 10, Tt = 1.0;
+double KP, KI, KD;
 Vector2d PIDErr = Vector2d::Zero();
 Vector2d PIDOut = Vector2d::Zero();
 
@@ -256,6 +256,34 @@ void initSD()
     ArduinoOTA.handle();
     delay(1000);
   }
+
+  // Open and read PID parameters from TVCData/PID.txt
+  File pidFile = SD.open("TVCData/PID.txt", FILE_READ);
+  if (pidFile) {
+    char line[32];  // Buffer to hold each line
+    while (pidFile.available()) {
+      int len = pidFile.readBytesUntil('\n', line, sizeof(line) - 1);
+      line[len] = '\0';  // Null-terminate the string
+
+      // Parse values based on prefix
+      if (strncmp(line, "KU=", 3) == 0) {
+        KU = atof(line + 3);
+      } else if (strncmp(line, "TU=", 3) == 0) {
+        TU = atof(line + 3);
+      } else if (strncmp(line, "N=", 2) == 0) {
+        N = atof(line + 2);
+      } else if (strncmp(line, "Tt=", 3) == 0) {
+        Tt = atof(line + 3);
+      }
+    }
+    pidFile.close();
+    // Update PID gains with Ziegler-Nichols tuning
+    KP = 0.6 * KU, KI = 1.2 * KU / TU, KD = 3.0 * KU * TU / 40.0;
+    Serial.println("PID parameters loaded.");
+  } else {
+    Serial.println("Failed to open PID.txt! Using builtin values");
+  }
+
   char fileNameBuf[32];
   sprintf(fileNameBuf, "TVCData/data%d.csv", fileNum);
   while (SD.exists(fileNameBuf))
