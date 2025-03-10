@@ -18,7 +18,8 @@
 #define INNER_SERVO_PIN 2
 #define OUTER_SERVO_PIN 0
 #define SD_CS_PIN 16 //15
-#define BUTTON_PIN 15 //16
+#define BUTTON_PIN 9 //16
+#define LED_PIN 15
 
 
 // enum State
@@ -100,6 +101,10 @@ sensors_event_t a, g, temp;
 
 // Data file
 File dataFile;
+
+bool useWifi = true;
+
+bool lastState = false;
 
 // PID vars
 // Vector2d PIDErr = Vector2d::Zero();
@@ -207,13 +212,19 @@ void initOTA()
   uint32_t notConnectedCounter = 0;
   while (WiFi.status() != WL_CONNECTED)
   {
-    delay(1000);
+    delay(250);
+    digitalWrite(LED_PIN, HIGH);
+    delay(250);
+    digitalWrite(LED_PIN, LOW);
+
     Serial.println("Wifi connecting...");
     notConnectedCounter++;
-    if (notConnectedCounter > 150)
+    if (notConnectedCounter > 10)
     { // Reset board if not connected after 5s
-      Serial.println("Resetting due to Wifi not connecting...");
-      ESP.restart();
+      Serial.println("Wifi not connected");
+      // ESP.restart();
+      useWifi = false;
+      return;
     }
   }
   Serial.print("Wifi connected, IP address: ");
@@ -234,8 +245,13 @@ void initMPU6050()
   {
     Serial.println("Failed to init MPU6050");
     // check for ota updates
-    ArduinoOTA.handle();
-    delay(1000);
+    if (useWifi) ArduinoOTA.handle();
+
+    // flash ---.---.
+    digitalWrite(LED_PIN, HIGH);
+    delay(750);
+    digitalWrite(LED_PIN, LOW);
+    delay(250);
   }
   mpu.setAccelerometerRange(MPU6050_RANGE_8_G); // 2,4,8,16
   mpu.setGyroRange(MPU6050_RANGE_500_DEG);      // 250,500,1000,2000
@@ -253,8 +269,11 @@ void initSD()
   {
     Serial.println("Failed to initialize SD");
     // check for ota updates
-    ArduinoOTA.handle();
-    delay(1000);
+    if (useWifi) ArduinoOTA.handle();
+    digitalWrite(LED_PIN, HIGH);
+    delay(250);
+    digitalWrite(LED_PIN, LOW);
+    delay(750);
   }
 
   // Open and read PID parameters from TVCData/PID.txt
@@ -281,7 +300,8 @@ void initSD()
     KP = 0.6 * KU, KI = 1.2 * KU / TU, KD = 3.0 * KU * TU / 40.0;
     Serial.println("PID parameters loaded.");
   } else {
-    Serial.println("Failed to open PID.txt! Using builtin values");
+    Serial.println("Failed to open PID.txt!");
+    ESP.restart();
   }
 
   char fileNameBuf[32];
@@ -292,6 +312,7 @@ void initSD()
     sprintf(fileNameBuf, "TVCData/data%d.csv", fileNum);
   }
   dataFile = SD.open(fileNameBuf, FILE_WRITE);
+  if (!dataFile) ESP.restart();
   Serial.printf("Writing to file %s\n", fileNameBuf);
   dataFile.println("T(us),Qw,Qx,Qy,Qz,ErrX(rad),ErrY(rad),TVCX(rad),TVCY(rad)");
 }
@@ -312,6 +333,10 @@ void calibrateSensors(int iter)
     mpu.getEvent(&a, &g, &temp);
     accel += Vector3d::fromSensorData(a.acceleration);
     gyro += Vector3d::fromSensorData(g.gyro);
+
+    digitalWrite(LED_PIN, lastState ? HIGH : LOW);
+    lastState = !lastState;
+
     delay(10);
   }
   accel /= iter;
@@ -338,14 +363,23 @@ void calibrateSensors(int iter)
  */
 void waitForLaunch(double threshold = 1., double freq = 500)
 {
+  unsigned long iters = 0;
   int period = (int)round(1000. / freq);
+  Serial.println("Waiting for launch");
   // wait while non-gravitational acceleration is less than the threshold
   while (abs(Vector3d::fromSensorData(a.acceleration).length() - gravity.length()) < threshold)
   {
     mpu.getEvent(&a, &g, &temp);
-    delay(period);
+
+    iters++;
+
+    if (iters % (int)(freq / 2) == 0) {
+      digitalWrite(LED_PIN, lastState ? HIGH : LOW);
+      lastState = !lastState;
+    }
     // check for ota updates
-    ArduinoOTA.handle();
+    if (useWifi) ArduinoOTA.handle();
+    delay(period);
   }
   return;
 }
@@ -421,6 +455,8 @@ Vector2d AxesPID(Vector2d setpoint)
  */
 IRAM_ATTR void reset_ISR() {
   dataFile.close();
+  digitalWrite(LED_PIN, LOW);
+  delay(100);
   ESP.restart();
 }
 
@@ -428,6 +464,9 @@ void setup()
 {
   Serial.begin(74880);
   Serial.println();
+
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  pinMode(LED_PIN, OUTPUT);
 
   // Initialize everything
   initServos();
@@ -440,13 +479,16 @@ void setup()
 
   attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), reset_ISR, FALLING);
 
+
   delay(1000);
 
   calibrateSensors(200);
 
-  // waitForLaunch();
+  waitForLaunch();
 
   Serial.println("Loop start");
+  digitalWrite(LED_PIN, HIGH);
+
   elapsedTime = 0;
   start = micros();
 }
@@ -454,7 +496,7 @@ void setup()
 void loop()
 {
   // check for ota updates
-  ArduinoOTA.handle();
+  if (useWifi) ArduinoOTA.handle();
 
   // Update dt
   dt = ((micros() - start) - elapsedTime) / 1.e6;
@@ -476,9 +518,9 @@ void loop()
                   PIDErr.y,
                   PIDOut.x,
                   PIDOut.y);
-  // if (elapsedTime - lastSaveTime > saveInterval)
-  // {
-  //   dataFile.flush();
-  //   lastSaveTime = elapsedTime;
-  // }
+  if (elapsedTime - lastSaveTime > saveInterval)
+  {
+    dataFile.flush();
+    lastSaveTime = elapsedTime;
+  }
 }
