@@ -7,8 +7,8 @@ from perlin_noise import PerlinNoise
 
 dt = 0.01  # timestep
 
-MAX_T = 50 # time to stop sim, 5
-BURN_TIME = 20 # 2
+MAX_T = 50 #50 # time to stop sim, 5
+BURN_TIME = 20 #20 # 2
 CP = 0  # neutral stability
 TVC_PIVOT_DIST = 0.3  # TVC motor mount pivot distance
 TVC_LENGTH = 0.05  # Length of motor
@@ -22,7 +22,7 @@ MASS = 0.25 # 1
 G = 9.81
 DRAG_FACTOR = .01 # for the drag equation
 RHO = 1.204 # kg/m^3
-ROT_DAMPING = 0.999  # rotation damping due to drag per dt
+ROT_DAMPING = 1 # 0.999  # rotation damping due to drag per dt
 
 WIND_FORCE = 1
 WIND_VEL = 5
@@ -53,13 +53,17 @@ vAngle = [0]
 tvc_deflection = [0]  # motor deflection relative to rocket
 setPitch = [90]  # pitch setpoint
 
-# PID vars - Ziegler-Nichols method
+# PID vars
 pitchI = 0       # integral error value
-Ku = 1.44    # oscillating KP value
-Tu = 4   # oscillation period
-KP = Ku * 0.6 - .5
-KI = Ku * 1.2 / Tu
-KD = 3 * Ku * Tu / 40
+
+# Tuning - Ziegler-Nichols method / Relay method
+ctrlAmp = 5 # amplitude of control oscillation
+outAmp = 2 # amplitude of output oscillation
+Ku = 4 * ctrlAmp / (math.pi * outAmp) #1.44    # oscillating KP value
+Tu = 4.55 #4   # oscillation period
+KP = Ku * 0.6 # Ku * 0.6
+KI = KP * 0.5 * Tu # Ku * 1.2 / Tu
+KD = KP * 0.12 * Tu # 3 * Ku * Tu / 40
 # KP = 1.44
 # KI = 0
 # KD = 0
@@ -116,7 +120,8 @@ def simloop():
 
   # actuate TVC
   # tvc_angle = max(-MAX_TV_DEFLECTION, min(MAX_TV_DEFLECTION, tvc_angle))
-  tvc_deflection.append(max(-MAX_TV_DEFLECTION, min(tvc_angle + TVC_OFFSET, MAX_TV_DEFLECTION)))
+  # tvc_deflection.append(math.copysign(ctrlAmp, 90 - pitch[-1])) # For bang-bang control tuning - Ku = 4(output change)/pi(amplitude), Tu = period
+  tvc_deflection.append(max(-MAX_TV_DEFLECTION, min(tvc_angle + TVC_OFFSET, MAX_TV_DEFLECTION))) # For running
 
   # Get thrust and forces
   F = thrust(t[-1])
@@ -125,9 +130,9 @@ def simloop():
   
   # Forces in local coordinates
   # Drag force
-  # vAngle.append(math.atan2(dy[-1], dx[-1]))
+  vAngle.append(math.atan2(dy[-1], dx[-1]))
   # vNet.append(math.hypot(dx[-1], dy[-1]))
-  # AoA.append(math.radians(pitch[-1]) - vAngle[-1])
+  AoA.append(math.radians(pitch[-1]) - vAngle[-1])
   # drag.append(0.5 * DRAG_FACTOR * math.cos(AoA[-1]) * vNet[-1] * vNet[-1] * RHO)
   # Add rocket force - drag force
   localF.append(F * math.cos(tvc_rad))# - drag[-1]
@@ -137,7 +142,7 @@ def simloop():
   d2y.append(localF[-1] * math.sin(pitch_rad) / MASS - G)
 
   # Angular acceleration
-  d2pitch.append(F * math.sin(tvc_rad) * TVC_PIVOT_DIST / MOI)
+  d2pitch.append(F * math.sin(tvc_rad) * TVC_PIVOT_DIST / MOI)# + 1 * math.sin(AoA[-1]) * TVC_PIVOT_DIST / MOI)
 
   # Integrate translational dynamics
   dx.append(dx[-1] + d2x[-1] * dt)
@@ -150,7 +155,7 @@ def simloop():
   pitch.append(pitch[-1] + dpitch[-1] * dt)
 
 
-while t[-1] < MAX_T: # and x[-1] >= 0:
+while t[-1] < MAX_T and y[-1] >= 0: # and x[-1] >= 0:
   # setPitch.append(90)
   # setPitch.append(random.randrange(30, 150) if t[-1] % 20 <= 0.001 and t[-1] < BURN_TIME else setPitch[-1])
   simloop()
@@ -195,11 +200,11 @@ plot(x, y, "Horiz. displacement (m)", "Vert. displacement (m)", "Position", lims
 
 plot(t, localF, "Time (s)", "Thrust (N)", "Thrust (N)")
 
-plot(t, dx, "Time (s)", "x vel", "x vel")
+plot(dx, t, "x vel", "Time (s)", "x vel")
 
-plot(t, dxErr, "Time (s)", "dxErr", "dxErr")
+plot(dxErr, t, "dxErr", "Time (s)", "dxErr")
 
-plot(t, dxPID, "Time (s)", "dxPID", "dxPID")
+plot(dxPID, t, "dxPID", "Time (s)", "dxPID")
 
 plt.tight_layout()
 
