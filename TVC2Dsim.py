@@ -7,18 +7,18 @@ from perlin_noise import PerlinNoise
 
 dt = 0.01  # timestep
 
-MAX_T = 50 #50 # time to stop sim, 5
-BURN_TIME = 20 #20 # 2
+MAX_T = 10 #50 # time to stop sim, 5
+BURN_TIME = 2 #20 # 2
 CP = 0  # neutral stability
-TVC_PIVOT_DIST = 0.3  # TVC motor mount pivot distance
+TVC_PIVOT_DIST = 0.25  # TVC motor mount pivot distance
 TVC_LENGTH = 0.05  # Length of motor
 MAX_TV_DEFLECTION = 15  # Max motor angular deflection in degrees
-MAX_DEG_PER_SEC = 600 #50  # Max motor deflection speed in deg/s
+MAX_DEG_PER_SEC = 300 #50  # Max motor deflection speed in deg/s
 MAX_DEFLECTION_STEP = MAX_DEG_PER_SEC * dt
 TVC_DELAY_DT = 5     # how many dt to delay reaction by
 TVC_OFFSET = 0 #1        # offset due to build inaccuracies
-MOI = 0.015 # 5  # moment of inertia
-MASS = 0.25 # 1
+MOI = 0.00118 # 5  # moment of inertia
+MASS = 0.22 # 1
 G = 9.81
 DRAG_FACTOR = .01 # for the drag equation
 RHO = 1.204 # kg/m^3
@@ -58,12 +58,13 @@ pitchI = 0       # integral error value
 
 # Tuning - Ziegler-Nichols method / Relay method
 ctrlAmp = 5 # amplitude of control oscillation
-outAmp = 2 # amplitude of output oscillation
+outAmp = 8.4 # amplitude of output oscillation
 Ku = 4 * ctrlAmp / (math.pi * outAmp) #1.44    # oscillating KP value
-Tu = 4.55 #4   # oscillation period
-KP = Ku * 0.6 # Ku * 0.6
-KI = KP * 0.5 * Tu # Ku * 1.2 / Tu
-KD = KP * 0.12 * Tu # 3 * Ku * Tu / 40
+Tu = 7.6 - 5.9 #4.55 #4   # oscillation period
+KP = Ku * 0.6
+KI = Ku * 1.2 / Tu
+KD = 3 * Ku * Tu / 40
+print(Ku, KP, KI, KD)
 # KP = 1.44
 # KI = 0
 # KD = 0
@@ -104,7 +105,7 @@ def simloop():
   noise.append(random.random())
   
   dxPID.append(PID(0, dx[-1], dxKP, dxKI, dxKD, dxErr, dxI))
-  setPitch.append(90 - dxPID[-1]) #PID(0, dy[-1], 1, 0, 0, dyErr, dyI))
+  setPitch.append(90)# - dxPID[-1]) #PID(0, dy[-1], 1, 0, 0, dyErr, dyI))
 
   # Update TVC angle with max deflection speed, including noise
   prev_tvc_angle = tvc_deflection[-1]
