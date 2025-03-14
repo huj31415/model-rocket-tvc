@@ -314,7 +314,7 @@ void initSD()
   dataFile = SD.open(fileNameBuf, FILE_WRITE);
   if (!dataFile) ESP.restart();
   Serial.printf("Writing to file %s\n", fileNameBuf);
-  dataFile.println("T(us),Qw,Qx,Qy,Qz,ErrX(rad),ErrY(rad),TVCX(rad),TVCY(rad)");
+  dataFile.println("T(us),Qw,Qx,Qy,Qz,ErrX(rad),ErrY(rad),TVCX(rad),TVCY(rad),AccelX(m/s2),AccelY(m/s2),AccelZ(m/s2)");
 }
 
 /**
@@ -508,7 +508,7 @@ void loop()
   // test();
 
   // Print data to file
-  dataFile.printf("%lu,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n",
+  dataFile.printf("%lu,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%3f,%3f,%3f\n",
                   elapsedTime,
                   globalRot.w,
                   globalRot.x,
@@ -517,7 +517,11 @@ void loop()
                   PIDErr.x,
                   PIDErr.y,
                   PIDOut.x,
-                  PIDOut.y);
+                  PIDOut.y,
+                  a.acceleration.x,
+                  a.acceleration.y,
+                  a.acceleration.z
+                );
   if (elapsedTime - lastSaveTime > saveInterval)
   {
     dataFile.flush();
