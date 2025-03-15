@@ -1,6 +1,6 @@
 # Model rocket TVC project
 
-Project overview: [presentation-excerpt.pdf](presentation-excerpt.pdf)
+Project overview (outdated, will update): [presentation-excerpt.pdf](presentation-excerpt.pdf)
 
 Python simulation: [TVC2Dsim.py](TVC2Dsim.py)
 
@@ -18,3 +18,7 @@ Control software (WIP): [main.cpp](Software/Project/src/main.cpp)
 * SD card reader
 * MPU6050 IMU sensor
 * 2 * 100uF capacitors
+
+#### [Successful flight first try! (modified B6 engine)](https://www.youtube.com/shorts/8aSuXW6JF90)
+
+#### [Failed second try (modified C6 engine)](https://www.youtube.com/shorts/3RMs-3tyxnA)
